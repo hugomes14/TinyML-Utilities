@@ -3,29 +3,40 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
+
+DEFAULT_SPEED = 0.001
 class VideoRunner:
     def __init__(self, video_name, dir):
+        """
+        Initialize the VideoRunner with a video file.
+        
+        Args:
+            video_name (str): Name of the video file.
+            dir (str): Directory where the video file is located.
+        """
         self.name = video_name
         self.dir = os.path.join(dir, self.name)
         
         self.video = cv2.VideoCapture(self.dir)
         
-        if self.video.isOpened():
-            self.frame_width = int(self.video.get(cv2.CAP_PROP_FRAME_WIDTH))
-            self.frame_height = int(self.video.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        else:
-            self.frame_width = None
-            self.frame_height = None
-            print("Error: Could not open video.")
+        if not self.video.isOpened():
+            raise ValueError(f"Error: Could not open video '{self.dir}'.")
+        
+        self.frame_width = int(self.video.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.frame_height = int(self.video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            
+
 
     def get_dimensions(self):
         return self.frame_width, self.frame_height
-    
+
+ 
     def release(self):
         self.video.release()
+
         
-    def play_it(self, speed = 0.001):
- 
+    def play_it(self, speed = DEFAULT_SPEED):
+
         plt.ion()      
         fig, ax = plt.subplots()
         img = ax.imshow(np.zeros((self.frame_height, self.frame_width)), cmap='gray', vmin=0, vmax=255)
@@ -38,7 +49,7 @@ class VideoRunner:
                 if not ret: 
                     break
                 
-                img.set_array(frame)
+                img.set_data(frame)
                 plt.draw()
                 plt.pause(speed)
 
