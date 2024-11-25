@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import cv2
 import serial
-
+import datetime
 
 # Update this to point to your actual Arduino CLI path if necessary
 ARDUINO_CLI_PATH = "arduino-cli"
@@ -101,11 +101,10 @@ class SketchConfig:
 
 
 
+
+
 class VideoCapture:
-    def __init__(self, port= PORT, baud_rate= BAUD_RATE, 
-                width= FRAMES_WIDTH, height= FRAMES_HEIGHT, 
-                bytes_per_pixel= BYTES_PER_PIXEL, fps= 3, filename = ""):
-        
+    def __init__(self, port, baud_rate, width, height, bytes_per_pixel, fps=3, filename=""):
         self.port = port
         self.baud_rate = baud_rate
         self.width = width
@@ -114,29 +113,26 @@ class VideoCapture:
         self.frame_size = self.width * self.height * self.bytes_per_pixel
         self.fps = fps
         self.filename = filename
-        
-        
+
     def set_up_writer(self):
         if self.filename:
             fourcc = cv2.VideoWriter_fourcc(*'XVID')  # Codec
-            return cv2.VideoWriter(self.filename, fourcc, self.fps, (self.width, self.height), isColor=False)
-        return None
-    
-    def process_frame(self, frame_data, video_writer, img):
-
-        # Convert the frame data to a numpy array
-        frame = np.frombuffer(frame_data, dtype=np.uint8).reshape((self.height, self.width))
-        
-        if video_writer:
-            # Write the frame to the video
-            video_writer.write(frame)
             
-        # Update the image
-        img.set_array(frame)
-        plt.draw()
-        plt.pause(0.001)  # Keep this low for responsiveness
-        
-    
+            time = datetime.datetime.now().strftime("%d_%m_%Y_%H_%M_%S")
+            name = self.filename + time + ".avi"
+            
+            return cv2.VideoWriter(name, fourcc, self.fps, (self.width, self.height), isColor=False)
+        return None
+
+    def process_frame(self, frame_data, video_writer):
+        # Convert the frame data to a new numpy array
+        frame = np.frombuffer(frame_data, dtype=np.uint8).reshape((self.height, self.width))
+
+        if video_writer:
+            video_writer.write(frame)  # Write the frame to the video
+
+        cv2.imshow('Real-time Image from Arduino', frame)  # Display the frame
+
     def capture(self):
         # Set up the serial connection
         ser = serial.Serial(self.port, self.baud_rate)
@@ -144,12 +140,7 @@ class VideoCapture:
         
         video_writer = self.set_up_writer()
 
-        plt.ion()  # Turn on interactive mode
-        fig, ax = plt.subplots()
-        img = ax.imshow(np.zeros((self.height, self.width)), cmap='gray', vmin=0, vmax=255)  # Create an empty image
-        ax.set_title("Real-time Image from Arduino")
-
-        data = bytearray()  # Initialize data buffer
+        data = bytearray(self.frame_size)  # Initialize data buffer
         i = 0
 
         try:
@@ -158,9 +149,7 @@ class VideoCapture:
             while True:
                 # Check if enough data is available
                 if ser.in_waiting > 0:
-                    
                     incoming_data = ser.read(ser.in_waiting)
-                    
                     
                     data[i:i+len(incoming_data)] = incoming_data
                     i += len(incoming_data)
@@ -168,21 +157,24 @@ class VideoCapture:
                     # Process frames as long as there is enough data
                     if i >= self.frame_size:
                         data = data[:self.frame_size]
-                        self.process_frame(data, video_writer, img)
+                        self.process_frame(data, video_writer)
                         i = 0
+                        ser.write(bytes([0xC0]))
+                        print(time.time())
 
-                        
+                # Check for key press to exit
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+
         except KeyboardInterrupt:
             print("Exiting...")
         except Exception as e:
             print(f"An error occurred: {e}")
         finally:
-            #plt.close(fig)  # Close the figure
             ser.close()  # Close the serial connection
             if video_writer:
                 video_writer.release()  # Release the video writer
                 print(f"Video saved as {self.filename}")
-            
-      
+            cv2.destroyAllWindows()  # Close all OpenCV windows
 
 

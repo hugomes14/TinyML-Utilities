@@ -17,17 +17,20 @@ void setup() {
 
   // Optionally, enable the test pattern for testing
   // Camera.testPattern();
-  while (Serial.read() != 0xC0) {
+  /*while (Serial.read() != 0xC0) {
     // Wait for the command to start reading
-  }
+  }*/
 }
 
 void loop() {
+    while (Serial.read() != 0xC0) {
+    // Wait for the command to start reading
+  }
   Camera.readFrame(data);
 
   Serial.write(data, bytesPerFrame);
   Serial.write(0xC0); // Send a command to indicate the end of the frame
 
 
-  //delay(100); // Adjust delay as needed
+
 }

@@ -20,19 +20,18 @@ arduino_settings = SketchConfig(arduino_cli_path= ARDUINO_CLI_PATH,
                                         sketch_path= SKETCH_PATH, 
                                         frames_widht= FRAMES_WIDTH,
                                         frames_height= FRAMES_HEIGHT,
-                                        baud_rate= BAUD_RATE
-                                       )
+                                        baud_rate= BAUD_RATE)
 
 #print(arduino_settings.available_ports())
 
-arduino_settings.compile()
+#arduino_settings.compile()
 
-arduino_settings.upload()
+#arduino_settings.upload()
 
-
+#if the filename is empty no capture will be saved
 video = VideoCapture(port= PORT, baud_rate= BAUD_RATE, 
                     width= FRAMES_WIDTH, height= FRAMES_HEIGHT,
-                    bytes_per_pixel= BYTES_PER_PIXEL, fps= FPS)
+                    bytes_per_pixel= BYTES_PER_PIXEL, fps= FPS, filename="")
 
 
 
