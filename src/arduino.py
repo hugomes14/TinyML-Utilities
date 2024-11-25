@@ -17,8 +17,9 @@ FRAMES_WIDTH = 320
 FRAMES_HEIGHT = 240
 BAUD_RATE = 256000
 BYTES_PER_PIXEL = 1
+FPS = 3
 
-class ArduinoSketchConfig:
+class SketchConfig:
     def __init__(self, arduino_cli_path= ARDUINO_CLI_PATH, 
                 board= BOARD, port= PORT, sketch_path= SKETCH_PATH,
                 frames_widht= FRAMES_WIDTH, frames_height= FRAMES_HEIGHT,
@@ -49,7 +50,14 @@ class ArduinoSketchConfig:
         if not self.port:
             print("Error: Port is not specified.")
             sys.exit(1)
+    
+    def available_ports(self):
+        self.ports_command = ["wmic", "path", "Win32_SerialPort", "get", "DeviceID"]
         
+        try:
+            return subprocess.run(self.ports_command)
+        except subprocess.CalledProcessError as e:
+            print(e)
 
     def compile(self):
         self.compile_command = [
@@ -74,7 +82,7 @@ class ArduinoSketchConfig:
         if not self.it_was_compiled:
             self.compile()
         
-        upload_command = [
+        self.upload_command = [
             self.arduino_cli_path,
             "upload",
             "-p", self.port,
@@ -84,103 +92,97 @@ class ArduinoSketchConfig:
 
         try:
             print("Uploading the sketch...")
-            subprocess.run(upload_command, check=True)
+            subprocess.run(self.upload_command, check=True)
             print("Upload successful.")
         except subprocess.CalledProcessError as e:
             print(f"Upload failed with return code: {e.returncode}")
             sys.exit(1)
             
-    def dummy_compile_and_upload(self):
-        
-        self.compile()
-        time.sleep(1)
-        self.upload()
-        
-    
+
 
 
 class VideoCapture:
     def __init__(self, port= PORT, baud_rate= BAUD_RATE, 
                 width= FRAMES_WIDTH, height= FRAMES_HEIGHT, 
-                bytes_per_pixel= BYTES_PER_PIXEL, record= False):
+                bytes_per_pixel= BYTES_PER_PIXEL, fps= 3, filename = ""):
+        
         self.port = port
         self.baud_rate = baud_rate
         self.width = width
         self.height = height
         self.bytes_per_pixel = bytes_per_pixel
         self.frame_size = self.width * self.height * self.bytes_per_pixel
-        self.record = record
-        
-        
-    
-    def inicialize_serial_communication(self):
-        self.ser = serial.Serial(self.port, self.baud_rate)
-        time.sleep(2)
-        
-        
-    def close_serial_communication(self):
-        try:
-            self.ser.close()
-        except serial.SerialException:
-            raise serial.SerialException
-
-
-    def video_settings(self, fps, video_filename):
-        self.fourcc = cv2.VideoWriter_fourcc(*'XVID')
         self.fps = fps
-        self.video_filename = str(video_filename) + str(time.time()) + ".avi"
-        return(f"The video will be recorded at {self.fps} fps and will be named {self.video_filename}")
- 
-    
-    def video_recorder(self):
-        self.video_writer = cv2.VideoWriter(self.video_filename, self.fourcc, self.fps, (self.width, self.height), isColor=False)
-
-   
- 
-    def live(self):
+        self.filename = filename
         
-        if self.record:
-            self.video_recorder()
+        
+    def set_up_writer(self):
+        if self.filename:
+            fourcc = cv2.VideoWriter_fourcc(*'XVID')  # Codec
+            return cv2.VideoWriter(self.filename, fourcc, self.fps, (self.width, self.height), isColor=False)
+        return None
+    
+    def process_frame(self, frame_data, video_writer, img):
+
+        # Convert the frame data to a numpy array
+        frame = np.frombuffer(frame_data, dtype=np.uint8).reshape((self.height, self.width))
+        
+        if video_writer:
+            # Write the frame to the video
+            video_writer.write(frame)
             
+        # Update the image
+        img.set_array(frame)
+        plt.draw()
+        plt.pause(0.001)  # Keep this low for responsiveness
+        
+    
+    def capture(self):
+        # Set up the serial connection
+        ser = serial.Serial(self.port, self.baud_rate)
+        time.sleep(2)  # Wait for the connection to establish
+        
+        video_writer = self.set_up_writer()
+
         plt.ion()  # Turn on interactive mode
         fig, ax = plt.subplots()
         img = ax.imshow(np.zeros((self.height, self.width)), cmap='gray', vmin=0, vmax=255)  # Create an empty image
         ax.set_title("Real-time Image from Arduino")
-        data = bytearray()
+
+        data = bytearray()  # Initialize data buffer
+        i = 0
+
         try:
-            self.ser.write(bytes([0xC0]))  # Send command to start receiving frames
+            ser.write(bytes([0xC0]))  # Send command to start receiving frames
             
             while True:
                 # Check if enough data is available
-                if self.ser.in_waiting > 0:
-                    # Read available data
-                    incoming_data = self.ser.read(self.ser.in_waiting)
-                    data += incoming_data
+                if ser.in_waiting > 0:
+                    
+                    incoming_data = ser.read(ser.in_waiting)
+                    
+                    
+                    data[i:i+len(incoming_data)] = incoming_data
+                    i += len(incoming_data)
                     
                     # Process frames as long as there is enough data
-                    if len(data) >= self.frame_size:
-                        # Extract the frame data
-                        frame_data = data[:self.frame_size]
-                        data = data.clear()
+                    if i >= self.frame_size:
+                        data = data[:self.frame_size]
+                        self.process_frame(data, video_writer, img)
+                        i = 0
 
-                        # Convert the frame data to a numpy array
-                        frame = np.frombuffer(frame_data, dtype=np.uint8).reshape((self.height, self.width))
                         
-                        # Write the frame to the video
-                        if self.record:
-                            self.video_writer.write(frame)
-                        # Update the image
-                        img.set_array(frame)
-                        plt.draw()
-                        #plt.pause(0.001)  # Keep this low for responsiveness
-
         except KeyboardInterrupt:
             print("Exiting...")
         except Exception as e:
             print(f"An error occurred: {e}")
         finally:
             #plt.close(fig)  # Close the figure
-            self.close_serial_communication()  # Close the serial connection
-            if self.record:
-                self.video_writer.release()  # Release the video writer
+            ser.close()  # Close the serial connection
+            if video_writer:
+                video_writer.release()  # Release the video writer
+                print(f"Video saved as {self.filename}")
+            
+      
+
 

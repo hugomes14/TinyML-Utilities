@@ -1,11 +1,11 @@
 import os
 import sys
 
-from src.video_capture import VideoCapture
+from src.arduino import VideoCapture, SketchConfig
 
 ARDUINO_CLI_PATH = "arduino-cli"
 BOARD = "arduino:mbed_nano:nano33ble"
-PORT = "COM3"
+PORT = "COM10"
 SKETCH_PATH = "src\\CameraCaptureRawBytes1\\CameraCaptureRawBytes1.ino"
 FRAMES_WIDTH = 320
 FRAMES_HEIGHT = 240
@@ -14,10 +14,27 @@ BYTES_PER_PIXEL = 1
 FPS= 1
 FILE_NAME = "Output"
 
+arduino_settings = SketchConfig(arduino_cli_path= ARDUINO_CLI_PATH, 
+                                        board= BOARD, 
+                                        port= PORT, 
+                                        sketch_path= SKETCH_PATH, 
+                                        frames_widht= FRAMES_WIDTH,
+                                        frames_height= FRAMES_HEIGHT,
+                                        baud_rate= BAUD_RATE
+                                       )
+
+#print(arduino_settings.available_ports())
+
+arduino_settings.compile()
+
+arduino_settings.upload()
+
+
 video = VideoCapture(port= PORT, baud_rate= BAUD_RATE, 
                     width= FRAMES_WIDTH, height= FRAMES_HEIGHT,
-                    bytes_per_pixel= BYTES_PER_PIXEL, record= False)
+                    bytes_per_pixel= BYTES_PER_PIXEL, fps= FPS)
 
-video.video_settings(fps= FPS, video_filename= FILE_NAME)
 
-print(video.__dict__.items())
+
+video.capture()
+
