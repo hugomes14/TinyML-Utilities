@@ -160,7 +160,6 @@ class VideoCapture:
                         self.process_frame(data, video_writer)
                         i = 0
                         ser.write(bytes([0xC0]))
-                        print(time.time())
 
                 # Check for key press to exit
                 if cv2.waitKey(1) & 0xFF == ord('q'):

@@ -2,7 +2,7 @@ import sys
 import os
 
 
-from src.video_runner import VideoRunner
+from src.video_utils import VideoRunner
 
 
 video = VideoRunner("teste2.avi", os.path.dirname(os.path.abspath(__file__)))

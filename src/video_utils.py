@@ -6,7 +6,7 @@ import numpy as np
 
 DEFAULT_SPEED = 0.001
 class VideoRunner:
-    def __init__(self, video_name, dir):
+    def __init__(self, video_name, dir, frame_by_farme = False):
         """
         Initialize the VideoRunner with a video file.
         
@@ -60,3 +60,19 @@ class VideoRunner:
             cv2.destroyAllWindows()
             plt.close()
         
+
+"""
+This classe provide tools for automate the 
+frame 
+"""
+class VideoCroper(VideoRunner):
+    def __init__(self,video_name, dir, positive_dataset, negative_dataset):
+        super().__init__(video_name= video_name, dir= dir)
+        
+        self.negative_dataset = negative_dataset
+        self.positive_dataset = positive_dataset
+        
+
+        
+    def play_it(self):
+        pass
