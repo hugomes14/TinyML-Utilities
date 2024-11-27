@@ -127,8 +127,14 @@ class VideoCrop(VideoRunner):
                 self.end_point = (event.xdata, event.ydata)
                 # Calculate width and height while maintaining aspect ratio
                 
+                
                 width = self.end_point[0] - self.start_point[0]
-                height = width / self.aspect_ratio  # Maintain aspect ratio
+                height = self.end_point[1] - self.start_point[1]
+                
+                if width >= height:
+                    height = width / self.aspect_ratio[0]  # Maintain aspect ratio
+                else:
+                    height = width / self.aspect_ratio[1]
                 
                 self.rect.set_width(width)
                 self.rect.set_height(height)
@@ -196,7 +202,7 @@ class VideoCrop(VideoRunner):
         # Variables to store the rectangle coordinates
         self.start_point = None
         self.end_point = None
-        self.aspect_ratio =  self.frame_width /self.frame_height  
+        self.aspect_ratio =  [self.frame_width / self.frame_height, self.frame_height / self.frame_width]  
 
  
     def count_files_in_directory(self, dir):

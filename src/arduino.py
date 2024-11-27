@@ -12,7 +12,7 @@ import datetime
 ARDUINO_CLI_PATH = "arduino-cli"
 BOARD = "arduino:mbed_nano:nano33ble"
 PORT = "COM3"
-SKETCH_PATH = "src\\CameraCaptureRawBytes1\\CameraCaptureRawBytes1.ino"  # Point to the .ino file
+SKETCH_PATH = "src\\CameraCaptureRawBytes1\\CameraCaptureRawBytes1.ino"  
 FRAMES_WIDTH = 320
 FRAMES_HEIGHT = 240
 BAUD_RATE = 256000
