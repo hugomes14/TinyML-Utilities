@@ -6,6 +6,7 @@ from matplotlib.widgets import Button
 import numpy as np
 
 
+
 DEFAULT_SPEED = 0.001
 
 class VideoRunner:
@@ -68,8 +69,8 @@ class VideoCrop(VideoRunner):
     def __init__(self, video_name, dir, negative_dataset, positive_dataset):
         super().__init__(video_name= video_name, dir= dir)
         
-        self.negative_dataset = negative_dataset
-        self.positive_dataset = positive_dataset
+        self.negative_dataset = os.path.join(dir, negative_dataset)
+        self.positive_dataset = os.path.join(dir, positive_dataset)
         
         
         plt.subplots_adjust(bottom=0.2)
@@ -85,39 +86,44 @@ class VideoCrop(VideoRunner):
         ax_next_frame = plt.axes([0.7, 0.05, 0.2, 0.075])
         self.button_next_frame = Button(ax_next_frame, "Next Frame")
         self.button_next_frame.on_clicked(self.next_callback)
-        
+
         self.fig.canvas.mpl_connect('button_press_event', self.on_click)
         self.fig.canvas.mpl_connect('motion_notify_event', self.on_drag)
         self.fig.canvas.mpl_connect('button_release_event', self.on_release)
         
         #flags
         self.rectangle_created = False
+        self.frames_index = 1
+        
+
     
     def positive_callback(self, event):
-        print("positive")
+        i = self.count_files_in_directory(self.positive_dataset)
+        cv2.imwrite(os.path.join(self.positive_dataset, f"{i+1}.png"), cv2.cvtColor(self.cropped_frame, cv2.COLOR_RGB2BGR))
 
         
     def negative_callback(self, event):
-        print("negative")
+        i = self.count_files_in_directory(self.negative_dataset)
+        cv2.imwrite(os.path.join(self.negative_dataset, f"{i+1}.png"), cv2.cvtColor(self.cropped_frame, cv2.COLOR_RGB2BGR))
 
 
     def next_callback(self, event):
-        print("next")
         self.next_frame_pressed = True
     
     
     def on_click(self, event):
         if  not self.rectangle_created:
-            if event.inaxes is not None:
-                self.create_triangle_entity()
+            if event.inaxes is not None and event.inaxes == self.ax:
+                self.create_rectangle_entity()
                 self.start_point = (event.xdata, event.ydata)
                 self.rect.set_xy(self.start_point)
                 plt.draw()
 
 
+
     def on_drag(self, event):
         if self.rectangle_created:
-            if self.start_point is not None and event.inaxes is not None:
+            if self.start_point is not None and event.inaxes is not None and event.inaxes == self.ax:
                 self.end_point = (event.xdata, event.ydata)
                 # Calculate width and height while maintaining aspect ratio
                 
@@ -130,22 +136,23 @@ class VideoCrop(VideoRunner):
                 plt.draw()
 
     def on_release(self, event):
-        print("choosing where to put the cropped frame")
         if self.rectangle_created:
-            if self.start_point and self.end_point:
+            if self.start_point and self.end_point and event.inaxes == self.ax:
+                print("choosing where to put the cropped frame")
                 x1, y1 = int(min(self.start_point[0], self.end_point[0])), int(min(self.start_point[1], self.end_point[1]))
                 x2, y2 = int(max(self.start_point[0], self.end_point[0])), int(max(self.start_point[1], self.end_point[1]))
 
                 # Crop the image
                 self.cropped_frame = self.frame[y1:y2, x1:x2]
-                
-                self.show_cropped_frame()
                 self.rect.remove()  # Remove the rectangle from the axes
                 self.rectangle_created = False
                 self.start_point = None  # Reset start point
                 self.end_point = None
+                
+                self.next_frame_pressed = False
 
-                   
+    
+      
     def dataset_constructer(self):
         try:
             while True:
@@ -156,6 +163,7 @@ class VideoCrop(VideoRunner):
                 if not ret:
                     break
                 
+        
                 self.frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 self.ax.clear()  # Clear the previous frame
                 self.ax.imshow(frame)  # Display the current frame
@@ -177,7 +185,7 @@ class VideoCrop(VideoRunner):
             plt.close()
     
     
-    def create_triangle_entity(self):
+    def create_rectangle_entity(self):
         # Create a rectangle patch
         
         self.rectangle_created = True
@@ -189,13 +197,16 @@ class VideoCrop(VideoRunner):
         self.start_point = None
         self.end_point = None
         self.aspect_ratio =  self.frame_width /self.frame_height  
+
+ 
+    def count_files_in_directory(self, dir):
+        try:
+            files = os.listdir(dir)
+            return len(files)
+        except:
+            return 0
         
-    def show_cropped_frame(self):
-        """Display the cropped frame in a new window."""
-        plt.figure("Cropped Frame")  # Create a new figure with a specific name
-        plt.imshow(self.cropped_frame)  # Display the cropped frame
-        plt.axis('off')  # Hide axis
-        plt.show()
+
 
     
     
