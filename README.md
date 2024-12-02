@@ -12,3 +12,6 @@ This is a tool to be use in a Artificial Vision project based on a tinyml module
 ## video_utils
 
 This module have some tools to handle the video. You can just play the video. Or you can built the negative and positive datasets to feed the model that you to create. The VideoCroper tools takes each frame from the video and let the user to crop the frame where he want and to place the croped part into one of the dataset.  
+
+
+alteração
