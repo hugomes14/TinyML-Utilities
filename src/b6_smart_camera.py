@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 WINDOW_WIDTH = 640
 WINDOW_HEIGHT = 480
 COMMAND = '<LIMA DIR="Request" CMD="Project_GetImage" TYPE="BMP" PATH="Module Application.Smart Camera.Image Monochrome.Grey"/>'
-IP = "xxx.xxx.xxx.xxx"
+IP = "192.168.100.1"
 PORT = 33040
 
 class SmartCamera:
