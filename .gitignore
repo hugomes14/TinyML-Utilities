@@ -166,3 +166,8 @@ cython_debug/
 #ignore the video 
 *.avi
 *.png
+
+*.cfg
+*.weights
+
+*.names
