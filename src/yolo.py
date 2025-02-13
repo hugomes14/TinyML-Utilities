@@ -19,6 +19,72 @@ COMMAND = '<LIMA DIR="Request" CMD="Project_GetImage" TYPE="BMP" PATH="Module Ap
 IP = "192.168.100.1"
 PORT = 33040
 
+# YOLO paths
+YOLO_WEIGHTS = "yolov3.weights"
+YOLO_CONFIG = "yolov3.cfg"
+YOLO_CLASSES = "coco.names"
+
+# Load YOLO model and classes
+net = cv2.dnn.readNet(YOLO_WEIGHTS, YOLO_CONFIG)
+with open(YOLO_CLASSES, 'r') as f:
+    classes = f.read().strip().split('\n')
+
+# Define colors for bounding boxes
+COLORS = np.random.uniform(0, 255, size=(len(classes), 3))
+
+def detect_objects(frame, net, classes, confidence_threshold=0.5, nms_threshold=0.4):
+    height, width = frame.shape[:2]
+
+    # Create a blob from the frame
+    blob = cv2.dnn.blobFromImage(frame, 1/255.0, (416, 416), swapRB=True, crop=False)
+    net.setInput(blob)
+
+    # Get detection results
+    layer_names = net.getLayerNames()
+    output_layers = [layer_names[i - 1] for i in net.getUnconnectedOutLayers()]  # Fixed indexing
+    detections = net.forward(output_layers)
+
+    # Process detections
+    boxes = []
+    confidences = []
+    class_ids = []
+
+    for output in detections:
+        for detection in output:
+            scores = detection[5:]
+            class_id = np.argmax(scores)
+            confidence = scores[class_id]
+
+            if confidence > confidence_threshold:
+                center_x = int(detection[0] * width)
+                center_y = int(detection[1] * height)
+                w = int(detection[2] * width)
+                h = int(detection[3] * height)
+
+                # Rectangle coordinates
+                x = int(center_x - w / 2)
+                y = int(center_y - h / 2)
+
+                boxes.append([x, y, w, h])
+                confidences.append(float(confidence))
+                class_ids.append(class_id)
+
+    # Apply Non-Max Suppression
+    indices = cv2.dnn.NMSBoxes(boxes, confidences, confidence_threshold, nms_threshold)
+
+    # Draw bounding boxes and labels
+    if len(indices) > 0:
+        for i in indices.flatten():
+            x, y, w, h = boxes[i]
+            label = str(classes[class_ids[i]])
+            confidence = confidences[i]
+            color = COLORS[class_ids[i]]
+
+            cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
+            cv2.putText(frame, f"{label} {confidence:.2f}", (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+    return frame
+
 class SmartCamera:
     def __init__(self, ip=IP, port=PORT, file_name='', fps=20, window_width=WINDOW_WIDTH, window_height=WINDOW_HEIGHT, command=COMMAND):
         self.ip = ip
@@ -79,6 +145,8 @@ class SmartCamera:
                     # Get frame from the queue
                     frame = frame_queue.get(timeout=0.1)  # Wait briefly for a frame
                     if frame is not None:
+                        # Perform object detection
+                        frame = detect_objects(frame, net, classes)
                         cv2.imshow("Video Stream", frame)
                     else:
                         logging.warning("No frame available for display.")
@@ -108,7 +176,7 @@ class SmartCamera:
                     frame = cv2.resize(frame, (self.window_width, self.window_height))
                     frame_queue.put(frame)  # Add frame to the queue
                     if video_writer:
-                            video_writer.write(frame)
+                        video_writer.write(frame)
                 else:
                     logging.warning("Failed to retrieve frame.")
         except Exception as e:
@@ -158,6 +226,3 @@ class SmartCamera:
 if __name__ == "__main__":
     camera = SmartCamera(file_name="output_video")
     camera.connection()
-
-
-
