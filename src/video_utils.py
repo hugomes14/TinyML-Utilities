@@ -219,17 +219,30 @@ class VideoCrop(VideoRunner):
 
     
 class VideoCropYolo(VideoRunner):
-    def __init__(self, video_name, dir, dataset):
+    def __init__(self, video_name, dir, dataset, file_number):
         super().__init__(video_name= video_name, dir= dir)
         
         self.yolo_images = os.path.join(dir, dataset, "images")
         self.yolo_labels = os.path.join(dir, dataset, "labels")
         
+        #flags
+        self.rectangle_created = False
+        self.frame_index = file_number
         self.same_frame = True
         
         
         plt.subplots_adjust(bottom=0.2)
         
+        self.setup_buttons()
+
+        self.fig.canvas.mpl_connect('button_press_event', self.on_click)
+        self.fig.canvas.mpl_connect('motion_notify_event', self.on_drag)
+        self.fig.canvas.mpl_connect('button_release_event', self.on_release)
+        
+
+        
+
+    def setup_buttons(self):
         ax_frente = plt.axes([0.1, 0.05, 0.2, 0.075])
         self.button_frente = Button(ax_frente, "Frente de onda")
         self.button_frente.on_clicked(self.frente_callback)
@@ -241,52 +254,46 @@ class VideoCropYolo(VideoRunner):
         ax_next_frame = plt.axes([0.7, 0.05, 0.2, 0.075])
         self.button_next_frame = Button(ax_next_frame, "Next Frame")
         self.button_next_frame.on_clicked(self.next_callback)
-
-        self.fig.canvas.mpl_connect('button_press_event', self.on_click)
-        self.fig.canvas.mpl_connect('motion_notify_event', self.on_drag)
-        self.fig.canvas.mpl_connect('button_release_event', self.on_release)
-        
-        #flags
-        self.rectangle_created = False
-        self.frames_index = 1
-        
-
     
-    def frente_callback(self, event):
-        norm_center = np.array([*self.rect.get_center()]) / np.array([self.frame_width, self.frame_height])
-        norm_width = self.rect.get_width()/self.frame_width
-        norm_height = self.rect.get_height()/self.frame_height
+    
+    def save_image(self, label):
+        
+
+        try:
+            norm_center = np.array([*self.rect.get_center()]) / np.array([self.frame_width, self.frame_height])
+            norm_width = self.rect.get_width()/self.frame_width
+            norm_height = self.rect.get_height()/self.frame_height
+        except:
+            return
+        
+        image_filename = os.path.join(self.yolo_images, f"{self.frame_index}.jpeg")
+        label_filename = os.path.join(self.yolo_labels, f"{self.frame_index}.txt")
+        
         
         i = self.count_files_in_directory(self.yolo_images)
         if i == 0 or not self.same_frame:
-            cv2.imwrite(os.path.join(self.yolo_images, f"{i+1}.jpeg"), cv2.cvtColor(self.frame, cv2.COLOR_RGB2BGR))
-            with open(os.path.join(self.yolo_labels, f"{i+1}.txt"), "w+") as f:
-                f.write(f"0 {self.rect.get_center()[0]/self.frame_width} {self.rect.get_center()[1]/self.frame_height} {self.rect.get_width()/self.frame_width} {self.rect.get_height()/self.frame_height}\n")
+            cv2.imwrite(image_filename, cv2.cvtColor(self.frame, cv2.COLOR_RGB2BGR))
+            with open(label_filename, "w") as f:
+                f.write(f"{label} {norm_center[0]} {norm_center[1]} {norm_width} {norm_height}\n")
             self.same_frame = True
         else:
-            with open(os.path.join(self.yolo_labels, f"{i}.txt"), "a") as f:
-                f.write(f"0 {self.rect.get_center()[0]/self.frame_width} {self.rect.get_center()[1]/self.frame_height} {self.rect.get_width()/self.frame_width} {self.rect.get_height()/self.frame_height}\n")
+            with open(label_filename, "a") as f:
+                f.write(f"{label} {norm_center[0]} {norm_center[1]} {norm_width} {norm_height}\n")
+        
+    
+    def frente_callback(self, event):
+        self.save_image(label="0")
         
 
         
     def fonte_callback(self, event):
-        
-        i = self.count_files_in_directory(self.yolo_images)
-        if i == 0 or not self.same_frame:
-            cv2.imwrite(os.path.join(self.yolo_images, f"{i+1}.jpeg"), cv2.cvtColor(self.frame, cv2.COLOR_RGB2BGR))
-            with open(os.path.join(self.yolo_labels, f"{i+1}.txt"), "w+") as f:
-                f.write(f"1 {self.rect.get_center()[0]/self.frame_width} {self.rect.get_center()[1]/self.frame_height} {self.rect.get_width()/self.frame_width} {self.rect.get_height()/self.frame_height}\n")
-            self.same_frame = True
-        else:
-            with open(os.path.join(self.yolo_labels, f"{i}.txt"), "a") as f:
-                f.write(f"1 {self.rect.get_center()[0]/self.frame_width} {self.rect.get_center()[1]/self.frame_height} {self.rect.get_width()/self.frame_width} {self.rect.get_height()/self.frame_height}\n")
+        self.save_image(label="1")   
             
-            
-
 
     def next_callback(self, event):
         self.next_frame_pressed = True
         self.same_frame = False
+        self.frame_index += 1
         
     
     
