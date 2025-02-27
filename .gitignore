@@ -173,3 +173,11 @@ cython_debug/
 *.weights
 
 *.names
+
+runs/
+
+dataset.yolov11/
+*.mp4
+
+*.pt
+
