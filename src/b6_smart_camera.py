@@ -10,8 +10,8 @@ import time
 import queue
 from dotenv import load_dotenv
 import os
-
-load_dotenv()  # Load environment variables from .env
+from ultralytics import YOLO
+load_dotenv("../env")  # Load environment variables from .env
 
 
 
@@ -22,11 +22,13 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 WINDOW_WIDTH = 640
 WINDOW_HEIGHT = 480
 COMMAND = '<LIMA DIR="Request" CMD="Project_GetImage" TYPE="BMP" PATH="Module Application.Smart Camera.Image Monochrome.Grey"/>'
-IP = os.getenv("MY_APP_IP")
-PORT = os.getenv("MY_APP_PORT")
+IP= "192.168.249.50"
+PORT= 33040
+"""IP = os.getenv("MY_APP_IP")
+PORT = os.getenv("MY_APP_PORT")"""
 
 class SmartCamera:
-    def __init__(self, ip=IP, port=PORT, file_name='', fps=20, window_width=WINDOW_WIDTH, window_height=WINDOW_HEIGHT, command=COMMAND):
+    def __init__(self, ip=IP, port=PORT, file_name='', fps=20, window_width=WINDOW_WIDTH, window_height=WINDOW_HEIGHT, command=COMMAND, detection= False, model_path= "", confiance= None):
         self.ip = ip
         self.port = port
         self.filename = file_name
@@ -34,6 +36,7 @@ class SmartCamera:
         self.window_width = window_width
         self.window_height = window_height
         self.command = command
+        self.detection = detection
         self.prev_time = time.time()
         self.real_fps = 0
         self.fps_media = []
@@ -44,6 +47,11 @@ class SmartCamera:
             raise ValueError(f"Invalid IP address: {ip}")
         if not (0 < port < 65536):
             raise ValueError(f"Invalid port number: {port}")
+        
+        if self.detection:
+            self.model = YOLO(model_path)
+            self.class_names = self.model.names if self.model.names else ['caixa-de-cima', 'caixa-de-lado', 'defeito']
+            self.confiance = confiance
 
     def is_valid_ip(self, ip):
         try:
@@ -153,7 +161,25 @@ class SmartCamera:
             self.real_fps = 1 / (self.current_time - self.prev_time)
             self.fps_media.append(self.real_fps)
             self.prev_time = self.current_time
-            
+            if self.detection:
+                try:
+                    results = self.model.predict(frame, conf=self.confiance, verbose=False)
+                    result = results[0]
+                except Exception as e:
+                    print(f"Error during YOLO inference: {e}")
+                    
+                
+                if result.boxes:
+                    boxes = result.boxes.xyxy.cpu().numpy()
+                    confs = result.boxes.conf.cpu().numpy()
+                    class_ids = result.boxes.cls.cpu().numpy().astype(int)
+                    
+                    for box, conf, cls in zip(boxes, confs, class_ids):
+                        x1, y1, x2, y2 = map(int, box)
+                        label = f"{self.class_names[cls]}: {conf:.2f}"
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                        cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
             cv2.putText(frame, f"Relative time: {(self.real_fps):.5f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
             return frame
         except Exception as e:

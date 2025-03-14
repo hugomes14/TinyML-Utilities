@@ -185,3 +185,4 @@ dataset.yolov11/
 datasets/
 modelos_yolo/
 videos/
+custom_logs/

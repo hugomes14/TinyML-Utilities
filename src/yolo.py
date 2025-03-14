@@ -1,5 +1,6 @@
 import cv2
 from ultralytics import YOLO
+import os
 
 class YOLOHandler:
     def __init__(self, model_path):
@@ -62,27 +63,24 @@ class YOLOHandler:
         cv2.destroyAllWindows()
 
     def train_model(self, data_yaml, **kwargs):
-        epochs = kwargs.get("epochs", 100)
-        img_size = kwargs.get("img_size", 640)
-        batch_size = kwargs.get("batch_size", 16)
-        device = kwargs.get("device", "cpu")
-        workers = kwargs.get("workers", 4)
-        optimizer = kwargs.get("optimizer", "AdamW")
-        lr0 = kwargs.get("lr0", 0.001)
-        cos_lr = kwargs.get("cos_lr", True)
-        augment = kwargs.get("augment", True)
-        patience = kwargs.get("patience", 5)
-
-        self.model.train(
-            data=data_yaml,
-            epochs=epochs,
-            imgsz=img_size,
-            batch=batch_size,
-            device=device,
-            workers=workers,
-            optimizer=optimizer,
-            lr0=lr0,
-            cos_lr=cos_lr,
-            augment=augment,
-            patience=patience
-        )
+        try:
+            print(f"Starting training with data_yaml: {data_yaml}")
+            print(f"Training with the following parameters: {kwargs}")
+            
+            self.model.train(
+                data=data_yaml,
+                epochs=kwargs.get("epochs", 100),
+                imgsz=kwargs.get("img_size", 640),
+                batch=kwargs.get("batch_size", 16),
+                device=kwargs.get("device", "cuda"),
+                workers=kwargs.get("workers", 4),
+                optimizer=kwargs.get("optimizer", "AdamW"),
+                lr0=kwargs.get("lr0", 0.001),
+                cos_lr=kwargs.get("cos_lr", True),
+                augment=kwargs.get("augment", True),
+                patience=kwargs.get("patience", 5),
+                project=kwargs.get("project", "custom_logs"),
+            )
+        except Exception as e:
+            print(f"Error occurred during training: {e}")
+            raise e
