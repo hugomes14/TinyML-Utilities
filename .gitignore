@@ -183,3 +183,5 @@ dataset.yolov11/
 *.pt
 
 datasets/
+modelos_yolo/
+videos/
