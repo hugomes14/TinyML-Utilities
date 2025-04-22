@@ -1,20 +1,23 @@
 from src.yolo import YOLOHandler
+from ultralytics import YOLO
+
+#model = YOLO("/home/dapa/Documentos/TinyML-Utilities/custom_logs/train17/weights/best.pt")
 
 # Initialize YOLO handler with trained model
-yolo = YOLOHandler("yolo11l.pt") #yolov8s.pt ....
+yolo = YOLOHandler("/home/dapa/Documentos/TinyML-Utilities/custom_logs/train17/weights/best.pt") #yolov8s.pt ....
 
 # Run object detection with custom parameters
-"""yolo.detect_objects(
-    video_path="./tests/videos/caixa.avi",
-    output_path="output.mp4",
-    conf_threshold=0.4,  # Set custom confidence threshold
-    show_video=True  # Disable video display
-)"""
+#yolo.detect_objects(
+#    video_path="tests/videos/digital_mp4_preto.mp4",
+#    output_path="output.mp4",
+#    conf_threshold=0.4,  # Set custom confidence threshold
+#    show_video=True  # Disable video display
+#)
 
 # Train a new model with custom parameters
 yolo.train_model(
-    data_yaml="./tests/datasets/caixa2.yolov8/data.yaml",
-    epochs=200,
+    data_yaml="/home/dapa/Documentos/tests/digital.dataset/data.yaml",
+    epochs=10,
     img_size=640,
     batch_size=10,
     device="cuda",

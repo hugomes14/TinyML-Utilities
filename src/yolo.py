@@ -1,6 +1,7 @@
 import cv2
 from ultralytics import YOLO
 import os
+import numpy as np
 
 class YOLOHandler:
     def __init__(self, model_path):
@@ -39,16 +40,35 @@ class YOLOHandler:
                 print(f"Error during YOLO inference: {e}")
                 break
             
-            if result.boxes:
-                boxes = result.boxes.xyxy.cpu().numpy()
-                confs = result.boxes.conf.cpu().numpy()
-                class_ids = result.boxes.cls.cpu().numpy().astype(int)
-                
-                for box, conf, cls in zip(boxes, confs, class_ids):
-                    x1, y1, x2, y2 = map(int, box)
+            if result.masks:
+                masks = result.masks.xy  # Get segmentation masks (list of polygons)
+                confs = result.boxes.conf.cpu().numpy()  # Confidence scores
+                class_ids = result.boxes.cls.cpu().numpy().astype(int)  # Class IDs
+
+                for mask, conf, cls in zip(masks, confs, class_ids):
+                    points = [np.array(mask, dtype=np.int32)]  # Convert to int for OpenCV
                     label = f"{self.class_names[cls]}: {conf:.2f}"
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+                    # Draw filled polygon (mask)
+                    #cv2.fillPoly(frame, points, (0, 0, 0, 200))  # Semi-transparent green
+
+                    # Draw mask contour
+                    cv2.polylines(frame, points, isClosed=True, color=(0, 0, 255), thickness=2)
+
+                    # Put label near the first point of the mask
+                    x, y = points[0][0]
+                    cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+            #if result.boxes:
+            #    boxes = result.boxes.xyxy.cpu().numpy()
+            #    confs = result.boxes.conf.cpu().numpy()
+            #    class_ids = result.boxes.cls.cpu().numpy().astype(int)
+            #    
+            #    for box, conf, cls in zip(boxes, confs, class_ids):
+            #        x1, y1, x2, y2 = map(int, box)
+            #        label = f"{self.class_names[cls]}: {conf:.2f}"
+            #        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            #        cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
             
             out.write(frame)
             if show_video:
@@ -84,3 +104,7 @@ class YOLOHandler:
         except Exception as e:
             print(f"Error occurred during training: {e}")
             raise e
+        
+
+
+

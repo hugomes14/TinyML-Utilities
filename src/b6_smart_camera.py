@@ -11,9 +11,8 @@ import queue
 from dotenv import load_dotenv
 import os
 from ultralytics import YOLO
+
 load_dotenv("../env")  # Load environment variables from .env
-
-
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
@@ -22,13 +21,13 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 WINDOW_WIDTH = 640
 WINDOW_HEIGHT = 480
 COMMAND = '<LIMA DIR="Request" CMD="Project_GetImage" TYPE="BMP" PATH="Module Application.Smart Camera.Image Monochrome.Grey"/>'
-IP= "192.168.249.50"
-PORT= 33040
+IP = "192.168.249.50"
+PORT = 33040
 """IP = os.getenv("MY_APP_IP")
 PORT = os.getenv("MY_APP_PORT")"""
 
 class SmartCamera:
-    def __init__(self, ip=IP, port=PORT, file_name='', fps=20, window_width=WINDOW_WIDTH, window_height=WINDOW_HEIGHT, command=COMMAND, detection= False, model_path= "", confiance= None):
+    def __init__(self, ip=IP, port=PORT, file_name='', fps=20, window_width=WINDOW_WIDTH, window_height=WINDOW_HEIGHT, command=COMMAND, detection=False, model_path="", confiance=None):
         self.ip = ip
         self.port = port
         self.filename = file_name
@@ -37,17 +36,20 @@ class SmartCamera:
         self.window_height = window_height
         self.command = command
         self.detection = detection
-        self.prev_time = time.time()
+        self.prev_time = time.perf_counter()  # Use high-precision time
         self.real_fps = 0
         self.fps_media = []
-        self.time_beggin = time.time()
+        self.time_beggin = time.perf_counter()
+        self.last_frame_time = time.perf_counter()  # Track time of last frame for drift compensation
+        self.count_frames = 0
+
 
         # Validate IP and port
         if not self.is_valid_ip(ip):
             raise ValueError(f"Invalid IP address: {ip}")
         if not (0 < port < 65536):
             raise ValueError(f"Invalid port number: {port}")
-        
+
         if self.detection:
             self.model = YOLO(model_path)
             self.class_names = self.model.names if self.model.names else ['caixa-de-cima', 'caixa-de-lado', 'defeito']
@@ -67,6 +69,19 @@ class SmartCamera:
             name = f"{self.filename}_{timestamp}.avi"
             return cv2.VideoWriter(name, fourcc, self.fps, (self.window_width, self.window_height), isColor=True)
         return None
+
+    def precise_wait(self, target_duration):
+        end_time = time.perf_counter() + target_duration
+        # Sleep until ~2ms before target
+        while True:
+            now = time.perf_counter()
+            if end_time - now > 0.002:
+                time.sleep(0.001)
+            else:
+                break
+        # Busy-wait the remaining time
+        while time.perf_counter() < end_time:
+            pass
 
     def connection(self):
         try:
@@ -101,7 +116,10 @@ class SmartCamera:
 
                 # Exit on 'q' key
                 if cv2.waitKey(1) & 0xFF == ord('q'):
-                    logging.info(sum(self.fps_media)/len(self.fps_media))
+                    logging.info(f"Target FPS: {self.fps}")
+                    logging.info(f"Average FPS: {sum(self.fps_media)/len(self.fps_media):.3f}")
+                    logging.info(f"Standard Deviation: {np.std(self.fps_media):.4f}")
+                    logging.info(f"Total Frames: {len(self.fps_media)}")
                     stop_event.set()
 
             thread.join()
@@ -122,7 +140,8 @@ class SmartCamera:
                     frame = cv2.resize(frame, (self.window_width, self.window_height))
                     frame_queue.put(frame)  # Add frame to the queue
                     if video_writer:
-                            video_writer.write(frame)
+                        self.count_frames += 1
+                        video_writer.write(frame)
                 else:
                     logging.warning("Failed to retrieve frame.")
         except Exception as e:
@@ -130,6 +149,9 @@ class SmartCamera:
 
     def take_frame(self, sock):
         try:
+            # Start high-precision timer
+            start_tick = cv2.getTickCount()
+
             # Send the LIMA command to get a BMP image
             sock.send(self.command.encode())
 
@@ -156,40 +178,54 @@ class SmartCamera:
             pil_image = Image.open(image_io)
             frame = np.array(pil_image)
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            
-            self.current_time = time.time()
-            self.real_fps = 1 / (self.current_time - self.prev_time)
-            self.fps_media.append(self.real_fps)
-            self.prev_time = self.current_time
+
+            # Detection using YOLO (if enabled)
             if self.detection:
                 try:
                     results = self.model.predict(frame, conf=self.confiance, verbose=False)
                     result = results[0]
                 except Exception as e:
-                    print(f"Error during YOLO inference: {e}")
-                    
-                
-                if result.boxes:
+                    logging.error(f"Error during YOLO inference: {e}")
+                    result = None
+
+
+
+                if result and result.boxes:
                     boxes = result.boxes.xyxy.cpu().numpy()
                     confs = result.boxes.conf.cpu().numpy()
                     class_ids = result.boxes.cls.cpu().numpy().astype(int)
-                    
+
                     for box, conf, cls in zip(boxes, confs, class_ids):
                         x1, y1, x2, y2 = map(int, box)
                         label = f"{self.class_names[cls]}: {conf:.2f}"
                         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                         cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-            cv2.putText(frame, f"Relative time: {(self.real_fps):.5f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            # End timing for processing
+            end_tick = cv2.getTickCount()
+            elapsed_time = (end_tick - start_tick) / cv2.getTickFrequency()
+
+            # Maintain target FPS
+            sleep_time = max(0, (1 / self.fps) - elapsed_time)
+            self.precise_wait(sleep_time)
+
+            # Total time including sleep
+            total_time = (cv2.getTickCount() - start_tick) / cv2.getTickFrequency()
+            self.real_fps = 1 / total_time
+            self.fps_media.append(self.real_fps)
+
+            # Display FPS on frame
+            cv2.putText(frame, f"Frames: {self.real_fps:.2f}", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
             return frame
+
         except Exception as e:
             logging.error(f"Error in frame retrieval: {e}")
             return None
+
 
 # Example usage
 if __name__ == "__main__":
     camera = SmartCamera(file_name="output_video")
     camera.connection()
-
-
-

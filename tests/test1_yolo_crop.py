@@ -4,9 +4,9 @@ import os
 
 from src.video_utils import VideoCropYolo
 
-VIDEO_NAME= "teste3.avi"
+VIDEO_NAME= "teste_novo.avi"
 DIR = os.path.dirname(os.path.abspath(__file__))
-DATASET = "yolo_dataset"
+DATASET = "digital_dataset"
 FILE_NUMBER = 2
 
 
