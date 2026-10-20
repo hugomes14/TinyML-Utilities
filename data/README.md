@@ -16,6 +16,7 @@ Esta pasta reúne os dados usados e gerados pelas ferramentas. Apenas este guia
 | `models/` | Pesos e ficheiros auxiliares YOLO históricos |
 | `runs/` | Resultados históricos de treino, preservando `detect/train*/` |
 | `migration/` | Manifesto local da migração e cópias dos originais ativos |
+| `benchmarks/` | Vídeos sintéticos, perfis e relatórios de medição sem hardware |
 
 As pastas sem dados podem não existir num clone novo. As ferramentas criam os
 destinos necessários ao gravar. A migração não elimina nem deduplica ficheiros.
@@ -23,3 +24,7 @@ destinos necessários ao gravar. A migração não elimina nem deduplica ficheir
 Consulta [a organização dos dados](../docs/data-layout.md) para os caminhos
 antigos e novos. Os ficheiros ignorados não acompanham clones do repositório;
 mantém cópias de segurança separadas dos dados que pretendes conservar.
+
+Cada captura atual produz um `.mkv` sem perdas, um `.frames.csv` com tempos por
+frame e um `.session.json` com configuração, estatísticas e motivo de paragem.
+Conserva os três ficheiros juntos. Os vídeos antigos não foram convertidos.

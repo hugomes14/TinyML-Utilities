@@ -1,114 +1,161 @@
-# Smartcamera: utilização e protocolo
+# Smartcamera: captura, tempos e extração
 
-## Ferramentas ativas
+## Âmbito e formato
 
-- `smartcamera.capture`: ligação à câmara, pedidos BMP, visualização e gravação.
-- `smartcamera.frame_grabber`: leitura de um vídeo local e exportação de frames.
+A captura atual usa **Matroska + FFV1**, sem perdas, com cadência variável (VFR).
+Conserva cada resposta válida uma vez, à resolução nativa, sem redimensionar nem
+adicionar indicadores aos píxeis gravados. Os indicadores existem apenas na janela.
+O extrator exporta o frame visível e usa timestamps do vídeo.
 
-Instala o projeto com `python -m pip install -e .`. Os exemplos abaixo pressupõem
-o Python desse ambiente e o terminal aberto na raiz do repositório.
+O suporte atual é para BMP com píxeis de 8 bits em tons de cinzento, BGR ou BGRA.
+Uma mudança de resolução ou canais durante a sessão provoca uma paragem com erro.
+Os ficheiros são maiores do que MP4 com compressão com perdas; o tamanho depende
+do conteúdo. Os MP4/AVI históricos não são convertidos nem alterados.
 
-## Ligação e captura
+## Comandos
 
-O computador tem de alcançar a câmara por TCP. O IP predefinido é o usado no
-código anterior; ajusta-o ao equipamento. O caminho LIMA corresponde à imagem
-monocromática do projeto da câmara.
+Instala com `python -m pip install -e .` e usa o Python desse ambiente:
 
 ```powershell
 python -m smartcamera.capture --ip 192.168.249.197 --port 33040 --fps 20
+python -m smartcamera.capture --output data/videos/captures/ensaio_01.mkv
+python -m smartcamera.capture --timeout 5 --no-save
 ```
 
 | Opção | Predefinição | Efeito |
 | --- | --- | --- |
 | `--ip` | `192.168.249.197` | IP ou hostname da câmara |
 | `--port` | `33040` | Porta TCP, entre 1 e 65535 |
-| `--fps` | `20` | FPS alvo e FPS fixos do vídeo; número finito positivo |
-| `--output` | Nome gerado em `data/videos/captures/` | Novo ficheiro `.mp4`; cria as pastas necessárias e recusa ficheiros existentes |
-| `--no-save` | Desativado | Mostra o streaming sem gravar; incompatível com `--output` |
-| `--help` | — | Mostra a ajuda sem iniciar ligação ou abrir janelas |
+| `--fps` | `20` | Ritmo alvo dos pedidos; não impõe FPS fixos à gravação |
+| `--timeout` | `5` | Prazo total de envio/receção de uma resposta, em segundos |
+| `--output` | Nome gerado em `data/videos/captures/` | Novo `.mkv`, com CSV e JSON acompanhantes |
+| `--no-save` | Desativado | Apenas visualização; incompatível com `--output` |
+| `--help` | — | Ajuda sem ligação ou janelas |
 
-O nome automático é `capture_AAAAMMDD_HHMMSS_microssegundos.mp4`, usando a hora
-local do computador. Os caminhos relativos dependem da pasta atual do terminal.
-A janela e o vídeo têm 960 × 720 pixels. Mantêm-se o redimensionamento por vizinho
-mais próximo e os textos de FPS médios e tempo relativo sobre a imagem gravada.
-O codec é `mp4v`.
+Os nomes automáticos incluem data, hora e microssegundos locais do computador.
+As pastas de destino são criadas. Nenhum dos três destinos pode já existir.
+`q` termina normalmente; `Ctrl+C` termina como interrupção. O modo de utilização
+continua manual, com janela; não há paragem programada ou reconexão automática.
 
-Termina com **q** na janela ou **Ctrl+C** no terminal. A captura é contínua;
-o nome do ficheiro não determina uma duração nem um temporizador.
+## Origem e representação do tempo
 
-## Sequência TCP/LIMA implementada
+- Usa-se `perf_counter_ns()` para intervalos monotónicos, independente de ajustes
+  ao relógio civil. A unidade em nanossegundos não garante exatidão dessa ordem.
+- Registam-se início do pedido e receção completa da resposta no computador.
+- A origem temporal é o instante de receção do primeiro BMP completo, antes da
+  descodificação. A ligação e a preparação da janela ficam fora desse intervalo.
+- O instante UTC do computador também é guardado por frame para referência civil.
+- O timestamp do vídeo é o tempo desde essa origem, arredondado ao milissegundo.
+  O CSV conserva o intervalo original em nanossegundos. Se dois timestamps não
+  forem distintos nessa resolução, a sessão termina com erro em vez de inventar tempos.
+- A duração de apresentação de um frame vai até à chegada do seguinte. A do último
+  vai até à paragem. Não se acrescentam imagens para preencher intervalos.
 
-1. Abre um socket TCP com timeout de 5 segundos, `TCP_NODELAY` e um buffer de
-   receção solicitado de 4 MiB.
-2. Envia o pedido ASCII:
+Estes tempos não medem a exposição no sensor. A resposta pode incluir atrasos
+do projeto da câmara, transporte e sistema operativo. Pedidos distintos também
+não garantem exposições distintas se a própria câmara devolver uma imagem em cache.
+Para sincronização com outros equipamentos, é necessário suporte adicional da câmara.
 
-   ```xml
-   <LIMA DIR="Request" CMD="Project_GetImage" TYPE="BMP" PATH="Module Application.Smart Camera.Image Monochrome.Grey"/>
-   ```
+## Metadados
 
-3. Lê o cabeçalho até `>`, com limite de 2048 bytes, e extrai `DATALEN`.
-4. Recebe exatamente o número de bytes indicado, em blocos de até 262144 bytes.
-5. Descodifica o BMP com OpenCV. Caso não seja descodificado, tenta Pillow e
-   converte para BGR.
-6. Mostra e, se solicitado, grava o frame. Repete o pedido ao ritmo alvo.
+Cada `.mkv` acompanha os seguintes ficheiros com o mesmo nome base.
 
-Esta descrição documenta o cliente existente. O comando e o caminho da imagem
-dependem do projeto configurado na câmara; ainda não são opções da linha de
-comandos. Não há reconexão automática.
+### CSV por frame: `.frames.csv`
 
-## Utilização em Python
+| Campo | Significado |
+| --- | --- |
+| `frame_index` | Índice guardado, a começar em 1 |
+| `request_started_ns` | Relógio monotónico no início do pedido |
+| `received_ns` | Relógio monotónico após a receção completa |
+| `received_utc` | Hora UTC do computador junto da receção |
+| `elapsed_ns` | Intervalo desde a primeira receção completa |
+| `video_pts_ms` | Timestamp de apresentação escrito no vídeo |
+| `response_bytes` | Número de bytes BMP recebidos |
+| `request_receive_ms` | Tempo entre início do pedido e receção completa |
+| `decode_ms` | Tempo entre receção e conclusão da descodificação, incluindo anotação UTC |
+| `record_ms` | Conversão/encode do frame e mux do pacote anterior |
+
+O CSV é descarregado para o sistema operativo após cada linha. `record_ms` não
+inclui a escrita da própria linha CSV, nem a finalização do contentor.
+
+### Resumo: `.session.json`
+
+Contém versão do esquema, configuração, origem temporal, dimensões/canais,
+codec, número de frames, duração e motivo da paragem. O estado inicial é
+`recording`; os estados finais são `completed`, `interrupted` e `error`.
+O resumo inclui contagens, médias e máximos de receção, descodificação,
+gravação e pré-visualização. Os tempos por frame permitem outras análises offline.
+
+Se a ligação falhar antes do primeiro frame, o JSON contém o erro, o CSV só tem
+cabeçalho e o `.mkv` pode estar vazio. Não se trata de um vídeo utilizável.
+Uma terminação abrupta do processo pode deixar estado `recording` e um vídeo
+incompleto; o fecho controlado não é uma garantia contra corte de energia.
+
+## Protocolo e tratamento de falhas
+
+O cliente TCP envia o pedido ASCII:
+
+```xml
+<LIMA DIR="Request" CMD="Project_GetImage" TYPE="BMP" PATH="Module Application.Smart Camera.Image Monochrome.Grey"/>
+```
+
+Lê até ao terminador `>` e extrai `DATALEN`. O cabeçalho está limitado a 2048
+bytes e a imagem a 64 MiB. Leituras em blocos conservam os bytes do BMP que
+chegarem juntamente com o cabeçalho. Depois recebem-se exatamente os bytes em falta.
+O prazo de resposta é total por pedido, mesmo que cheguem pequenos blocos.
+
+Timeout, desconexão, resposta inválida, falha de descodificação ou gravação
+terminam a sessão. O cliente e a janela são fechados e tenta-se finalizar o
+vídeo e os metadados já produzidos. Não se volta a ligar silenciosamente.
+Se houver uma falha de disco, não é possível garantir a finalização dos ficheiros.
+
+O último frame pode permanecer visível no vídeo durante a espera que terminou
+em timeout. O JSON marca a sessão como `error`, e o CSV identifica quando ocorreu
+a última receção; esse intervalo não representa novas imagens da câmara.
+
+## Organização do código
+
+| Módulo | Responsabilidade |
+| --- | --- |
+| `client.py` | TCP/LIMA, limites, deadline, descodificação nativa e tempos de receção |
+| `recording.py` | FFV1/VFR, duração de pacotes, CSV, JSON e estatísticas |
+| `capture.py` | Opções, ritmo dos pedidos, janela e ciclo de vida da sessão |
+| `video.py` | Índice de frames, timestamps reais e leitura do frame selecionado |
+| `frame_grabber.py` | Interface PyQt5 e exportação da imagem visível |
 
 ```python
-from smartcamera.capture import SmartCameraStableFPS
+from smartcamera.capture import SmartCameraCapture
 
-camera = SmartCameraStableFPS(
-    ip="192.168.249.197",
-    port=33040,
-    fps=20,
-    output_path="data/videos/captures/ensaio_02.mp4",
+camera = SmartCameraCapture(
+    ip="192.168.249.197", port=33040, fps=20,
+    output_path="data/videos/captures/ensaio_02.mkv", timeout=5,
 )
 camera.run()
 ```
 
-Para apenas visualizar, usa `save_video=False`. `run()` fecha a ligação, as
-janelas e o gravador ao terminar, incluindo erros durante a preparação da janela
-ou da gravação. Criar a instância ou importar o módulo não liga à câmara.
+O nome `SmartCameraStableFPS` continua como alias por compatibilidade de import;
+não implica garantia de FPS estáveis. O destino agora tem de ser `.mkv`.
 
-## Extrator de frames
+## Extrator e desempenho
 
 ```powershell
 python -m smartcamera.frame_grabber --videos-dir data/videos --frames-dir data/frames
 ```
 
-As opções definem as pastas sugeridas pelos diálogos, que continuam a permitir
-escolher outros caminhos. O vídeo é aberto por **Open Video**. O slider e os
-botões navegam frame a frame; **Take Frame** relê o frame selecionado e exporta
-a imagem original, sem o redimensionamento da pré-visualização.
+O leitor indexa timestamps ao abrir. Nas capturas FFV1, usa os pacotes sem
+descodificar todas as imagens. Para outros codecs, percorre a descodificação
+para obter uma contagem e timestamps corretos; vídeos longos podem demorar a abrir.
+Só conserva a imagem atualmente selecionada, além do índice temporal.
 
-O nome sugerido é `<video>_frame_<numero>.png`; a numeração visível começa em 1.
-São aceites `.png`, `.jpg` e `.jpeg`, com PNG por omissão. A gravação usa
-`cv2.imencode()` e `tofile()` para suportar caminhos Windows com acentos. A seleção
-de um destino existente é tratada pelo diálogo de gravação da interface.
+Uma abertura falhada conserva o vídeo anterior. Uma leitura falhada conserva o
+frame visível e repõe o slider. Redimensionamento e exportação usam a imagem em
+memória, sem novo seek/decode. PNG preserva píxeis; JPEG continua disponível com perdas.
 
-## Diagnóstico
+Consulta as [medições e limitações](performance.md). Não se pode inferir a
+cadência real da câmara a partir do benchmark sintético.
 
-| Sintoma | Verificação |
-| --- | --- |
-| `No module named smartcamera` | Usar o Python do ambiente onde foi executado `pip install -e .` |
-| Timeout ou ligação recusada | Confirmar alimentação, rede, IP, porta e acesso TCP à câmara |
-| `DATALEN not found` ou cabeçalho inválido | Confirmar o projeto e o caminho da imagem LIMA no equipamento |
-| Erro de descodificação | Confirmar que a resposta contém um BMP completo |
-| `Could not open video writer` | Confirmar permissões, espaço livre e suporte ao codec `mp4v` |
-| Destino já existente | Escolher outro `--output` ou usar o nome automático |
-| Janela indisponível | Executar numa sessão com ambiente gráfico e OpenCV/PyQt5 instalados |
+## Referências técnicas
 
-## Limitações reservadas para otimização
-
-A cadência continua a usar `perf_counter()`, um intervalo alvo e `sleep()` quando
-há tempo disponível. Cada frame recebido origina um frame gravado; não há
-duplicação, interpolação ou compensação temporal. Se a câmara entregar menos FPS
-do que o valor fixo do gravador, a duração do vídeo pode diferir do tempo real.
-
-O relógio dos indicadores continua a começar na criação da instância. A revisão
-dos indicadores, da precisão temporal, da eficiência de receção e da recuperação
-de falhas fica para uma fase posterior. Esta refatoração não garante 20 FPS reais.
+- [Tempos e PTS no PyAV](https://pyav.org/docs/stable/api/time.html)
+- [Codificação de arrays NumPy com PyAV](https://pyav.org/docs/stable/cookbook/numpy.html)
+- [FFV1 no FFmpeg](https://ffmpeg.org/ffmpeg-codecs.html#ffv1)

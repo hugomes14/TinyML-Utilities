@@ -18,6 +18,7 @@ Os dados de trabalho estão em `data/` e são ignorados pelo Git, exceto o seu
 | `runs/` | `data/runs/` |
 | Novas gravações, por omissão | `data/videos/captures/` |
 | Novos frames, pasta sugerida | `data/frames/` |
+| Perfis e vídeos sintéticos de medição | `data/benchmarks/` |
 
 As subpastas históricas dos datasets e treinos mantêm os seus nomes. Por exemplo,
 `runs/detect/train15/weights/best.pt` passa a
@@ -32,7 +33,7 @@ se recuperares um treino, terás de rever esses caminhos.
 Podes agrupar os novos ensaios em subpastas sem alterar a aplicação:
 
 ```powershell
-python -m smartcamera.capture --output data/videos/captures/ensaio_01/camara.mp4
+python -m smartcamera.capture --output data/videos/captures/ensaio_01/camara.mkv
 python -m smartcamera.frame_grabber --videos-dir data/videos/captures/ensaio_01 --frames-dir data/frames/ensaio_01
 ```
 
@@ -40,10 +41,16 @@ A captura cria as pastas necessárias ao gravar. O extrator cria as pastas do
 destino escolhido ao exportar a imagem. Os caminhos são relativos ao terminal,
 não à localização do módulo Python.
 
+Uma captura gera três ficheiros com o mesmo nome base: `camara.mkv`,
+`camara.frames.csv` e `camara.session.json`. O vídeo contém os píxeis e os tempos
+de apresentação; o CSV conserva os tempos do computador por frame e o JSON
+identifica a configuração e eventuais interrupções. Guarda-os juntos.
+
 ## Git e cópias locais
 
 - `/data/*` exclui os dados locais e mantém apenas `/data/README.md` versionável.
 - Vídeos e pesos também são ignorados por extensão se forem criados fora de `data/`.
+- Os ficheiros gerados `*.frames.csv`, `*.session.json` e `*.prof` também são ignorados.
 - Ambientes virtuais, caches, resultados de testes e ficheiros de instalação são ignorados.
 - Imagens, ficheiros `.txt`, `.cfg` e `.names` fora de `data/` podem ser versionados;
   deixam de existir exclusões globais que impediam documentação ou configuração.

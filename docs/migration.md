@@ -1,4 +1,8 @@
-# Refatoração da organização do repositório
+# Refatoração da organização do repositório — versão 0.2.0
+
+Este documento regista a primeira fase, já concluída. As alterações posteriores
+de captura, formato, timestamps e extrator estão descritas no
+[guia atual](smartcamera.md) e nas [medições](performance.md).
 
 ## Âmbito acordado
 

@@ -46,6 +46,9 @@ coverage.xml
 *.weights
 *.onnx
 *.tflite
+*.frames.csv
+*.session.json
+*.prof
 
 # Editores e sistema operativo
 .idea/

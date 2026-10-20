@@ -1,263 +1,138 @@
-"""Capture and record BMP frames requested from a LIMA smartcamera."""
+"""Manual LIMA capture with native lossless video and host timestamps."""
 
 import argparse
 from datetime import datetime
-import io
+import logging
 import math
 from pathlib import Path
-import re
-import socket
 import time
-import logging
+
+import av
 import cv2
-import numpy as np
-from PIL import Image
+
+from .client import COMMAND, LimaClient
+from .recording import SessionRecorder, output_paths
 
 
 IP = "192.168.249.197"
 PORT = 33040
-
-WINDOW_WIDTH = 960
-WINDOW_HEIGHT = 720
-
 TARGET_FPS = 20
-
-COMMAND = '<LIMA DIR="Request" CMD="Project_GetImage" TYPE="BMP" PATH="Module Application.Smart Camera.Image Monochrome.Grey"/>'
-
-RECV_CHUNK_SIZE = 262144
-
+WINDOW_WIDTH, WINDOW_HEIGHT = 960, 720
 DEFAULT_OUTPUT_DIR = Path("data/videos/captures")
 
 
-class SmartCameraStableFPS:
-    """Keep the existing capture pacing while allowing runtime configuration."""
+class SmartCameraCapture:
+    """Acquire each frame once; target FPS limits requests, never video time."""
 
-    def __init__(self, ip=IP, port=PORT, fps=TARGET_FPS, output_path=None, save_video=True):
-        if not ip:
+    def __init__(self, ip=IP, port=PORT, fps=TARGET_FPS, output_path=None,
+                 save_video=True, timeout=5.0):
+        if not ip.strip():
             raise ValueError("Camera IP or hostname must not be empty.")
-        if not 1 <= port <= 65535:
-            raise ValueError("Port must be between 1 and 65535.")
+        if not isinstance(port, int) or not 1 <= port <= 65535:
+            raise ValueError("Port must be an integer between 1 and 65535.")
         if not math.isfinite(fps) or fps <= 0:
-            raise ValueError("FPS must be a finite number greater than zero.")
-
-        self.ip = ip
-        self.port = port
-        self.fps = fps
+            raise ValueError("FPS must be finite and greater than zero.")
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("Timeout must be finite and greater than zero.")
+        self.ip, self.port, self.fps, self.timeout = ip, port, fps, timeout
         self.frame_interval = 1.0 / fps
         self.save_video = save_video
         self.output_path = Path(output_path) if output_path is not None else (
-            DEFAULT_OUTPUT_DIR / f"capture_{datetime.now():%Y%m%d_%H%M%S_%f}.mp4"
+            DEFAULT_OUTPUT_DIR / f"capture_{datetime.now():%Y%m%d_%H%M%S_%f}.mkv"
         )
-        if self.save_video and self.output_path.suffix.lower() != ".mp4":
-            raise ValueError("Capture output must have an .mp4 extension.")
-
+        if save_video and self.output_path.suffix.lower() != ".mkv":
+            raise ValueError("Lossless capture output must have an .mkv extension.")
         self.frame_count = 0
-        self.start_time = time.perf_counter()
-        self.last_frame_time = time.perf_counter()
-        self.frame_times_ms = []
-        self.video_writer = None
 
-    def connect(self):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(5.0)
-
-        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
-
-        logging.info("Connecting to camera...")
-        try:
-            sock.connect((self.ip, self.port))
-        except OSError:
-            sock.close()
-            raise
-        logging.info("Connected to camera.")
-
-        return sock
-
-    def recv_lima_header(self, sock):
-        header = bytearray()
-
-        while True:
-            b = sock.recv(1)
-
-            if not b:
-                raise ConnectionError("Socket closed while reading header.")
-
-            header.extend(b)
-
-            if b == b">":
-                break
-
-            if len(header) > 2048:
-                raise ValueError(f"Invalid header: {header[:300]}")
-
-        return bytes(header)
-
-    def extract_datalen(self, header_bytes):
-        header_str = header_bytes.decode(errors="ignore")
-        match = re.search(r'DATALEN="(\d+)"', header_str)
-
-        if not match:
-            raise ValueError(f"DATALEN not found in header: {header_str}")
-
-        return int(match.group(1))
-
-    def recv_exactly(self, sock, n_bytes):
-        data = bytearray(n_bytes)
-        view = memoryview(data)
-        received_total = 0
-
-        while received_total < n_bytes:
-            received = sock.recv_into(
-                view[received_total:],
-                min(RECV_CHUNK_SIZE, n_bytes - received_total)
-            )
-
-            if received == 0:
-                raise ConnectionError("Socket closed while receiving image data.")
-
-            received_total += received
-
-        return data
-
-    def decode_bmp(self, image_data):
-        arr = np.frombuffer(image_data, dtype=np.uint8)
-        frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-
-        if frame is None:
-            pil_image = Image.open(io.BytesIO(image_data))
-            frame = np.array(pil_image)
-
-            if frame.ndim == 2:
-                frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
-            else:
-                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-
-        return frame
-
-    def take_frame(self, sock):
-        sock.sendall(COMMAND.encode("ascii"))
-
-        header = self.recv_lima_header(sock)
-        data_length = self.extract_datalen(header)
-
-        image_data = self.recv_exactly(sock, data_length)
-        frame = self.decode_bmp(image_data)
-
-        return frame, data_length
-
-    def init_video_writer(self):
-        if self.output_path.exists():
-            raise FileExistsError(f"Output already exists: {self.output_path}")
-        self.output_path.parent.mkdir(parents=True, exist_ok=True)
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-
-        self.video_writer = cv2.VideoWriter(
-            str(self.output_path),
-            fourcc,
-            self.fps,
-            (WINDOW_WIDTH, WINDOW_HEIGHT)
-        )
-
-        if not self.video_writer.isOpened():
-            raise RuntimeError("Could not open video writer.")
-
-        logging.info(f"Saving video to: {self.output_path}")
+    def _preview(self, sample, elapsed_ns):
+        image = sample.image
+        if image.ndim == 2:
+            display = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        elif image.shape[2] == 4:
+            display = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
+        else:
+            display = image
+        # Always allocate the preview so overlays cannot alter the recorded pixels.
+        display = cv2.resize(display, (WINDOW_WIDTH, WINDOW_HEIGHT), interpolation=cv2.INTER_NEAREST)
+        elapsed = elapsed_ns / 1e9
+        fps = (self.frame_count - 1) / elapsed if elapsed > 0 else 0.0
+        for text, y in ((f"Received FPS: {fps:.2f}", 40), (f"Relative time: {elapsed:.3f} s", 80)):
+            cv2.putText(display, text, (20, y), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+        cv2.imshow("Video Stream", display)
+        return cv2.waitKey(1) & 0xFF
 
     def run(self):
-        sock = self.connect()
+        client = LimaClient(self.ip, self.port, self.timeout)
+        recorder = None
+        window_open = False
+        status, reason = "completed", "user_stop"
+        self.frame_count = 0
+        origin_ns = None
         try:
-            cv2.namedWindow("Video Stream", cv2.WINDOW_NORMAL)
-            cv2.resizeWindow("Video Stream", WINDOW_WIDTH, WINDOW_HEIGHT)
-
             if self.save_video:
-                self.init_video_writer()
-
-            next_frame_time = time.perf_counter()
-
+                recorder = SessionRecorder(self.output_path, {
+                    "ip": self.ip, "port": self.port,
+                    "target_fps": self.fps, "frame_timeout_s": self.timeout,
+                    "command": COMMAND,
+                })
+            logging.info("Connecting to %s:%s", self.ip, self.port)
+            client.connect()
+            cv2.namedWindow("Video Stream", cv2.WINDOW_NORMAL)
+            window_open = True
+            cv2.resizeWindow("Video Stream", WINDOW_WIDTH, WINDOW_HEIGHT)
+            next_request_ns = time.perf_counter_ns()
             while True:
-                frame, data_length = self.take_frame(sock)
-
-                now = time.perf_counter()
-                frame_dt_ms = (now - self.last_frame_time) * 1000
-                self.last_frame_time = now
-
-                self.frame_times_ms.append(frame_dt_ms)
-                if len(self.frame_times_ms) > 120:
-                    self.frame_times_ms.pop(0)
-
+                sample = client.take_frame()
+                if origin_ns is None:
+                    origin_ns = sample.received_ns
                 self.frame_count += 1
-
-                relative_time = now - self.start_time
-                avg_fps = self.frame_count / relative_time if relative_time > 0 else 0
-
-                display = cv2.resize(
-                    frame,
-                    (WINDOW_WIDTH, WINDOW_HEIGHT),
-                    interpolation=cv2.INTER_NEAREST
-                )
-
-                cv2.putText(
-                    display,
-                    f"Average FPS: {avg_fps:.2f}",
-                    (20, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1.0,
-                    (0, 255, 0),
-                    2
-                )
-
-                cv2.putText(
-                    display,
-                    f"Relative time: {relative_time:.2f} s",
-                    (20, 80),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1.0,
-                    (0, 255, 0),
-                    2
-                )
-
-                # Save frame to video
-                if self.save_video and self.video_writer is not None:
-                    self.video_writer.write(display)
-
-                cv2.imshow("Video Stream", display)
-
-                key = cv2.waitKey(1) & 0xFF
+                if recorder is not None:
+                    recorder.write(sample)
+                started = time.perf_counter_ns()
+                key = self._preview(sample, sample.received_ns - origin_ns)
+                if recorder is not None:
+                    recorder.stages["preview"].add((time.perf_counter_ns() - started) / 1e6)
                 if key == ord("q"):
                     break
-
-                next_frame_time += self.frame_interval
-                sleep_time = next_frame_time - time.perf_counter()
-
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
+                next_request_ns += round(self.frame_interval * 1e9)
+                now = time.perf_counter_ns()
+                if next_request_ns > now:
+                    time.sleep((next_request_ns - now) / 1e9)
                 else:
-                    next_frame_time = time.perf_counter()
-
+                    next_request_ns = now
+        except KeyboardInterrupt:
+            status, reason = "interrupted", "keyboard_interrupt"
+            raise
+        except Exception as error:
+            status, reason = "error", f"{type(error).__name__}: {error}"
+            raise
         finally:
-            sock.close()
+            ended_ns = time.perf_counter_ns()
+            try:
+                client.close()
+            finally:
+                try:
+                    if recorder is not None:
+                        recorder.close(ended_ns, status, reason)
+                        logging.info("Recording closed: %s (%s, %d frames)",
+                                     self.output_path, status, recorder.frame_count)
+                finally:
+                    if window_open:
+                        cv2.destroyAllWindows()
 
-            if self.video_writer is not None:
-                self.video_writer.release()
-                logging.info(f"Video writer closed: {self.output_path}")
 
-            cv2.destroyAllWindows()
-
-            total_time = time.perf_counter() - self.start_time
-            if total_time > 0:
-                logging.info(f"Final average FPS: {self.frame_count / total_time:.2f}")
+# Keep the previously documented Python import available.
+SmartCameraStableFPS = SmartCameraCapture
 
 
-def positive_fps(value):
-    """Validate a CLI frame rate, including NaN and infinity."""
+def positive_number(value):
     try:
-        fps = float(value)
+        number = float(value)
     except ValueError as error:
-        raise argparse.ArgumentTypeError("FPS must be a number.") from error
-    if not math.isfinite(fps) or fps <= 0:
-        raise argparse.ArgumentTypeError("FPS must be finite and greater than zero.")
-    return fps
+        raise argparse.ArgumentTypeError("Expected a number.") from error
+    if not math.isfinite(number) or number <= 0:
+        raise argparse.ArgumentTypeError("Value must be finite and greater than zero.")
+    return number
 
 
 def port_number(value):
@@ -271,13 +146,17 @@ def port_number(value):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(description="Visualizar e gravar a smartcamera LIMA.")
-    parser.add_argument("--ip", default=IP, help=f"IP ou hostname da camara (predefinido: {IP}).")
+    parser = argparse.ArgumentParser(description="Captura LIMA sem perdas, com timestamps reais de rececao.")
+    parser.add_argument("--ip", default=IP, help=f"IP ou hostname (predefinido: {IP}).")
     parser.add_argument("--port", type=port_number, default=PORT, help=f"Porta TCP (predefinida: {PORT}).")
-    parser.add_argument("--fps", type=positive_fps, default=TARGET_FPS, help="FPS alvo e FPS fixos do ficheiro (predefinido: 20).")
+    parser.add_argument("--fps", type=positive_number, default=TARGET_FPS,
+                        help="Limite alvo de pedidos por segundo; nao define a duracao do video (20).")
+    parser.add_argument("--timeout", type=positive_number, default=5.0,
+                        help="Prazo total por resposta, em segundos (5).")
     output = parser.add_mutually_exclusive_group()
-    output.add_argument("--output", type=Path, help="Ficheiro .mp4 novo; por omissao, gera um nome em data/videos/captures/.")
-    output.add_argument("--no-save", action="store_true", help="Mostrar a captura sem gravar video.")
+    output.add_argument("--output", type=Path,
+                        help="Novo ficheiro .mkv; gera tambem .frames.csv e .session.json.")
+    output.add_argument("--no-save", action="store_true", help="Apenas visualizar, sem video nem metadados.")
     return parser
 
 
@@ -286,22 +165,22 @@ def main(argv=None):
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     try:
-        camera = SmartCameraStableFPS(
-            ip=args.ip, port=args.port, fps=args.fps,
-            output_path=args.output, save_video=not args.no_save,
+        camera = SmartCameraCapture(
+            ip=args.ip, port=args.port, fps=args.fps, output_path=args.output,
+            save_video=not args.no_save, timeout=args.timeout,
         )
     except ValueError as error:
         parser.error(str(error))
-
-    if camera.save_video and camera.output_path.exists():
-        parser.error(f"Output already exists: {camera.output_path}")
-
+    if camera.save_video:
+        for path in output_paths(camera.output_path):
+            if path.exists():
+                parser.error(f"Output already exists: {path}")
     try:
         camera.run()
     except KeyboardInterrupt:
         logging.info("Capture interrupted.")
         return 130
-    except (OSError, ValueError, RuntimeError, cv2.error) as error:
+    except (OSError, ValueError, RuntimeError, cv2.error, av.error.FFmpegError) as error:
         logging.error("Capture failed: %s", error)
         return 1
     return 0
