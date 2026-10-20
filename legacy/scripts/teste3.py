@@ -5,7 +5,7 @@ from src.arduino import VideoCapture, SketchConfig
 
 ARDUINO_CLI_PATH = "arduino-cli"
 BOARD = "arduino:mbed_nano:nano33ble"
-PORT = "COM10"
+PORT = "COM8"
 SKETCH_PATH = "src\\CameraCaptureRawBytes1\\CameraCaptureRawBytes1.ino"
 FRAMES_WIDTH = 320
 FRAMES_HEIGHT = 240

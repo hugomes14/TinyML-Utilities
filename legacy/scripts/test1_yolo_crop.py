@@ -4,7 +4,7 @@ import os
 
 from src.video_utils import VideoCropYolo
 
-VIDEO_NAME= "teste3.avi"
+VIDEO_NAME= r"C:\Users\hugo.gomes\Desktop\TinyML-Utilities\240_2s.mp4"
 DIR = os.path.dirname(os.path.abspath(__file__))
 DATASET = "yolo_dataset"
 FILE_NUMBER = 2
